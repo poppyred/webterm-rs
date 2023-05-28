@@ -59,20 +59,11 @@ struct Line(String);
 struct Ping;
 /// Define HTTP actor
 struct MyWs {
-    process: Option<Child>,
-    stdout: Option<ChildStdout>,
-    stdin: Option<Arc<Mutex<tokio::process::ChildStdin>>>,
     pty: Option<Arc<Mutex<Pty>>>,
-    stderr: Option<ChildStderr>,
-    // stderr: Option<LinesStream<BufReader<ChildStderr>>>,
 }
 impl MyWs {
     fn new() -> Self {
         MyWs {
-            process: None,
-            stdout: None,
-            stderr: None,
-            stdin: None,
             pty: None,
         }
     }
@@ -244,42 +235,6 @@ async fn main() -> std::io::Result<()> {
     .await
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn test() {
-    let mut pty = pty_process::Pty::new().unwrap();
-    pty.resize(pty_process::Size::new(24, 80)).unwrap();
-    let mut cmd = pty_process::Command::new("zsh");
-    cmd.stdout(Stdio::piped())
-        .stdin(Stdio::piped())
-        .stderr(Stdio::piped())
-        .env_clear()
-        .envs(std::env::vars());
-    let mut child = cmd.spawn(&pty.pts().unwrap()).unwrap();
-
-    run(&mut child, &mut pty).await.expect("error run");
-    let status = child.wait().await.unwrap();
-    std::process::exit(
-        status
-            .code()
-            .unwrap_or_else(|| status.signal().unwrap_or(0) + 128),
-    );
-}
-
-#[tokio::test]
-async fn main2() {
-    let mut pty = pty_process::Pty::new().unwrap();
-    pty.resize(pty_process::Size::new(24, 80)).unwrap();
-    let mut cmd = pty_process::Command::new("zsh");
-    cmd.envs(std::env::vars());
-    let mut child = cmd.spawn(&pty.pts().unwrap()).unwrap();
-    run(&mut child, &mut pty).await.expect("error run");
-    let status = child.wait().await.unwrap();
-    std::process::exit(
-        status
-            .code()
-            .unwrap_or_else(|| status.signal().unwrap_or(0) + 128),
-    );
-}
 
 pub async fn run(
     child: &mut tokio::process::Child,
