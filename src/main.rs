@@ -2,7 +2,7 @@
 
 use actix_files::{Files, NamedFile};
 use actix_web::web::BytesMut;
-use actix_web::{get, middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer};
+use actix_web::{get, middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer,Responder};
 
 use actix::prelude::*;
 use actix::AsyncContext;
@@ -10,7 +10,7 @@ use actix_web_actors::ws;
 use async_stream::stream;
 
 use tokio::io::AsyncReadExt;
-
+use mime_guess::from_path;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use pty_process::{OwnedReadPty, OwnedWritePty, Pty};
@@ -193,11 +193,28 @@ async fn ws_handler(req: HttpRequest, stream: web::Payload) -> Result<HttpRespon
     println!("{:?}", resp);
     resp
 }
+#[derive(rust_embed::RustEmbed)]
+#[folder = "web/"]
+struct Asset;
+fn handle_embedded_file(path: &str) -> HttpResponse {
+    match Asset::get(path) {
+      Some(content) => HttpResponse::Ok()
+        .content_type(from_path(path).first_or_octet_stream().as_ref())
+        .body(content.data.into_owned()),
+      None => HttpResponse::NotFound().body("404 Not Found"),
+    }
+  }
 
 #[get("/")]
-async fn index() -> Result<NamedFile, Error> {
-    Ok(NamedFile::open(PathBuf::from("./web/index.html"))?)
+async fn index() -> impl Responder {
+    handle_embedded_file("index.html")
 }
+  
+#[actix_web::get("/{_:.*}")]
+async fn staticfs(path: web::Path<String>) -> impl Responder {
+  handle_embedded_file(path.as_str())
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init();
@@ -208,8 +225,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::Logger::default())
             .route("/ws/", web::get().to(ws_handler))
             .service(index)
-            .service(Files::new("/", "./web").show_files_listing())
-            .service(Files::new("/node_modules", "./web/node_modules").show_files_listing())
+            .service(staticfs)
     })
     .bind("0.0.0.0:8080")?
     .run()
