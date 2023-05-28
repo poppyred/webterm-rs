@@ -1,6 +1,6 @@
 [package]
 name = "webterm-rs"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["gaoyan <373251686@qq.com>"]
 edition = "2021"
 repository = "https://github.com/poppyred/webterm-rs.git"
