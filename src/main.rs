@@ -82,7 +82,7 @@ impl Actor for MyWs {
             .filter(|&(ref k, _)| k == "TERM" || k == "TZ" || k == "LANG" || k == "PATH")
             .collect();
         let mut pty = pty_process::Pty::new().unwrap();
-        pty.resize(pty_process::Size::new(24, 80)).unwrap();
+        pty.resize(pty_process::Size::new(50, 130)).unwrap();
         let mut cmd = pty_process::Command::new("sh");
         cmd.envs(std::env::vars());
         cmd.env("key", "xterm-256color");

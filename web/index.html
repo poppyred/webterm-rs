@@ -13,13 +13,37 @@
     <h1>learning</h1>
     <div id="terminal"></div>
     <script type="module">
-        const term = new Terminal();
+        const term = new Terminal({
+            cols: 130,
+            rows: 60,
+        });
         const socket = new WebSocket('ws://localhost:8080/ws/');
         const attachAddon = new AttachAddon.AttachAddon(socket);
+        const fitAddon = new FitAddon.FitAddon();
+
 
         // Attach the socket to term
         term.loadAddon(attachAddon);
+        term.loadAddon(fitAddon);
         term.open(document.getElementById('terminal'));
+
+        socket.onopen = function () {
+            fitAddon.fit();
+
+        }
+
+        // term.onResize((size) => {
+        //     socket.emit('resize', size)
+        // })
+
+        fitAddon.fit()
+        // socket.emit('resize', { cols: term.cols, rows: term.rows })
+
+        window.addEventListener('resize', (data) => {
+            setTimeout(() => {
+                fitAddon.fit()
+            }, 250)
+        })
     </script>
 </body>
 
