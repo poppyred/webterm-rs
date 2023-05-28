@@ -2,6 +2,7 @@
 name = "wsterm"
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/poppyred/webterm-rs.git"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
