@@ -1,14 +1,15 @@
 #![feature(mutex_unlock)]
 
-use actix_files::{Files, NamedFile};
+
 use actix_web::web::BytesMut;
 use actix_web::{get, middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer,Responder};
 
 use actix::prelude::*;
 use actix::AsyncContext;
 use actix_web_actors::ws;
-use async_stream::stream;
 
+
+use async_stream::stream;
 use tokio::io::AsyncReadExt;
 use mime_guess::from_path;
 use tokio::io::AsyncWriteExt;
@@ -16,7 +17,7 @@ use tokio::sync::Mutex;
 use pty_process::{OwnedReadPty, OwnedWritePty, Pty};
 use std::collections::HashMap;
 use std::env;
-use std::path::PathBuf;
+
 use std::sync::Arc;
 
 #[derive(Message)]
@@ -53,12 +54,12 @@ impl Actor for MyWs {
         let filtered_env: HashMap<String, String> = env::vars()
             .filter(|&(ref k, _)| k == "TERM" || k == "TZ" || k == "LANG" || k == "PATH")
             .collect();
-        let mut pty = pty_process::Pty::new().unwrap();
+        let pty= pty_process::Pty::new().unwrap();
         pty.resize(pty_process::Size::new(50, 130)).unwrap();
         let mut cmd = pty_process::Command::new("sh");
         cmd.envs(filtered_env);
         cmd.env("key", "xterm-256color");
-        let mut child = cmd.spawn(&pty.pts().unwrap()).unwrap();
+        let child = cmd.spawn(&pty.pts().unwrap()).unwrap();
         // run(&mut child, &mut pty).await.expect("error run");
         let (r, w) = pty.into_split();
         self.r = Some(Arc::new(Mutex::new(r)));
