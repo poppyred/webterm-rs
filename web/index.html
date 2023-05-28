@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+
+<head>
+    <link rel="stylesheet" href="node_modules/xterm/css/xterm.css" />
+    <script src="node_modules/xterm/lib/xterm.js"></script>
+    <script src="node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
+    <script src="node_modules/xterm-addon-web-links/lib/xterm-addon-web-links.js"></script>
+    <script src="node_modules/xterm-addon-attach/lib/xterm-addon-attach.js"></script>
+</head>
+
+<body>
+    <h1>learning</h1>
+    <div id="terminal"></div>
+    <script type="module">
+        const term = new Terminal();
+        const socket = new WebSocket('ws://localhost:8080/ws/');
+        const attachAddon = new AttachAddon.AttachAddon(socket);
+
+        // Attach the socket to term
+        term.loadAddon(attachAddon);
+        term.open(document.getElementById('terminal'));
+    </script>
+</body>
+
+</html>
