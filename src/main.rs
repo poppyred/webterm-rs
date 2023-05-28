@@ -34,14 +34,15 @@ use tokio_stream::wrappers::LinesStream;
 use tokio_util::codec::BytesCodec;
 use tokio_util::codec::FramedRead;
 
-use pty_process::Pty;
+use pty_process::{Pty, OwnedReadPty, OwnedWritePty};
+use std::any::Any;
 use std::collections::HashMap;
 use std::env;
 use std::ffi::c_ushort;
-use std::ops::{DerefMut, Deref};
+use std::ops::{Deref, DerefMut};
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
-use std::process::{Stdio, Output};
+use std::process::{Output, Stdio};
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
@@ -59,13 +60,13 @@ struct Line(String);
 struct Ping;
 /// Define HTTP actor
 struct MyWs {
-    pty: Option<Arc<Mutex<Pty>>>,
+    // pty: Option<Arc<Mutex<Pty>>>,
+    r: Option<Arc<Mutex<OwnedReadPty>>>,
+    w: Option<Arc<Mutex<OwnedWritePty>>>,
 }
 impl MyWs {
     fn new() -> Self {
-        MyWs {
-            pty: None,
-        }
+        MyWs { r: None, w: None}
     }
 }
 
@@ -83,28 +84,41 @@ impl Actor for MyWs {
         let mut pty = pty_process::Pty::new().unwrap();
         pty.resize(pty_process::Size::new(24, 80)).unwrap();
         let mut cmd = pty_process::Command::new("sh");
-        // cmd.envs(std::env::vars());
+        cmd.envs(std::env::vars());
         cmd.env("key", "xterm-256color");
         let mut child = cmd.spawn(&pty.pts().unwrap()).unwrap();
         // run(&mut child, &mut pty).await.expect("error run");
         let mut stdin = tokio::io::stdin();
         let mut stdout = tokio::io::stdout();
-        self.pty = Some(Arc::new(Mutex::new(pty)));
-        let output=self.pty.clone();
+        let (r,w)=pty.into_split();
+
+        self.r = Some(Arc::new(Mutex::new(r)));
+        self.w = Some(Arc::new(Mutex::new(w)));
+        // self.pty = Some(Arc::new(Mutex::new(pty)));
+        // let r = self.r.clone().unwrap();
+        // let lines = tokio::io::BufReader::new( {
+        //    r
+        // }).lines();
+        // ctx.add_stream(LinesStream::new(lines).map(|l|{
+        //     Ok(Line(String::from(l.unwrap())))
+        // }));
+        let output = self.r.clone();
         ctx.add_stream(stream! {
             let mut out_buf = [0_u8; 40960];
             loop{
                 let mutex = output.clone().expect("clone error");
                 {
-                    let _ = tokio::time::sleep(Duration::from_millis(1000)).await;
+                    match mutex.try_lock_owned(){
+                        Ok(mut lock)=>{
 
-                    let mut lock = mutex.lock().await;
-                    let len =( lock).read(&mut out_buf).await.expect("read error");
-                    let s = String::from_utf8(out_buf[..len].to_vec()).expect("cov str error");
-                    yield Ok(Line(s));
-                    let _ = tokio::time::sleep(Duration::from_millis(1000)).await;
-                   
+                        let len =( lock).read(&mut out_buf).await.expect("read error");
+                        let s = String::from_utf8(out_buf[..len].to_vec()).expect("cov str error");
+                        yield Ok(Line(s));
+                        },
+                        Err(_err)=>{   print!("stream lock fail")},
+                    };
                 }
+                // let _ = tokio::time::sleep(Duration::from_millis(1000)).await;
                 println!("sleep");
 
             }
@@ -176,7 +190,7 @@ impl Handler<CommandRunner> for MyWs {
     type Result = Result<(), ()>;
     fn handle(&mut self, msg: CommandRunner, ctx: &mut Self::Context) -> Self::Result {
         // let cmd = Arc::new(&msg);
-        let pty = self.pty.clone();
+        let pty = self.w.clone();
 
         let fut = async move {
             let binding = pty.expect("err pty");
@@ -189,21 +203,19 @@ impl Handler<CommandRunner> for MyWs {
                 .expect("write error");
             let _ = lock.flush().await.expect("flush error");
             println!("w flush");
-            //  } else {
-            //      println!("try_lock failed");
-            //  }
+     
             ();
         };
         let lang_server_fut = actix::fut::wrap_future(fut);
         ctx.spawn(lang_server_fut);
-
 
         Ok(())
     }
 }
 impl Drop for MyWs {
     fn drop(&mut self) {
-        drop(self.stdin.take());
+        drop(self.w.take());
+        drop(self.r.take());
     }
 }
 
@@ -235,13 +247,11 @@ async fn main() -> std::io::Result<()> {
     .await
 }
 
-
 pub async fn run(
     child: &mut tokio::process::Child,
     pty: &mut Pty,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
     // let _raw = super::raw_guard::RawGuard::new();
-
     let mut in_buf = [0_u8; 40960];
     let mut out_buf = [0_u8; 40960];
 
@@ -300,4 +310,10 @@ pub async fn run(
     }
 
     Ok(())
+}
+
+#[test]
+fn testList() {
+    let list: [u32; 3] = [1, 23, 4];
+    let t = list[0];
 }
