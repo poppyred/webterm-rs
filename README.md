@@ -14,5 +14,5 @@ cargo run
 
 ## release
 ```shell
-cargo publish --registry crates-io --allow-dirty
+cargo publish --registry crates-io
 ```
