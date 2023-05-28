@@ -1,6 +1,5 @@
 #![feature(mutex_unlock)]
 
-use actix::fut::wrap_stream;
 use actix_files::{Files, NamedFile};
 use actix_web::web::BytesMut;
 use actix_web::{get, middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer};
@@ -10,42 +9,15 @@ use actix::AsyncContext;
 use actix_web_actors::ws;
 use async_stream::stream;
 
-use futures_util::StreamExt;
-use futures_util::{ready, FutureExt};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+use tokio::io::AsyncReadExt;
 
-use tokio::io::split;
 use tokio::io::AsyncWriteExt;
-
-// use tokio::process::Child;
-// use tokio::process::ChildStderr;
-// use tokio::process::ChildStdin;
-// use tokio::process::ChildStdout;
-// use tokio::process::Command;
-
-use futures_util::stream::once;
-use tokio::io::BufReader;
-use tokio::process::{Child, ChildStderr, ChildStdout};
-use tokio::spawn;
 use tokio::sync::Mutex;
-use tokio::time::sleep;
-use tokio_codec::LinesCodec;
-use tokio_stream::wrappers::LinesStream;
-use tokio_util::codec::BytesCodec;
-use tokio_util::codec::FramedRead;
-
-use pty_process::{Pty, OwnedReadPty, OwnedWritePty};
-use std::any::Any;
+use pty_process::{OwnedReadPty, OwnedWritePty, Pty};
 use std::collections::HashMap;
 use std::env;
-use std::ffi::c_ushort;
-use std::ops::{Deref, DerefMut};
-use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
-use std::process::{Output, Stdio};
 use std::sync::Arc;
-use std::task::Poll;
-use std::time::Duration;
 
 #[derive(Message)]
 #[rtype(result = "Result<(), ()>")]
@@ -66,7 +38,7 @@ struct MyWs {
 }
 impl MyWs {
     fn new() -> Self {
-        MyWs { r: None, w: None}
+        MyWs { r: None, w: None }
     }
 }
 
@@ -84,14 +56,11 @@ impl Actor for MyWs {
         let mut pty = pty_process::Pty::new().unwrap();
         pty.resize(pty_process::Size::new(50, 130)).unwrap();
         let mut cmd = pty_process::Command::new("sh");
-        cmd.envs(std::env::vars());
+        cmd.envs(filtered_env);
         cmd.env("key", "xterm-256color");
         let mut child = cmd.spawn(&pty.pts().unwrap()).unwrap();
         // run(&mut child, &mut pty).await.expect("error run");
-        let mut stdin = tokio::io::stdin();
-        let mut stdout = tokio::io::stdout();
-        let (r,w)=pty.into_split();
-
+        let (r, w) = pty.into_split();
         self.r = Some(Arc::new(Mutex::new(r)));
         self.w = Some(Arc::new(Mutex::new(w)));
         // self.pty = Some(Arc::new(Mutex::new(pty)));
@@ -203,7 +172,7 @@ impl Handler<CommandRunner> for MyWs {
                 .expect("write error");
             let _ = lock.flush().await.expect("flush error");
             println!("w flush");
-     
+
             ();
         };
         let lang_server_fut = actix::fut::wrap_future(fut);
