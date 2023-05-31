@@ -1,22 +1,24 @@
 #![feature(mutex_unlock)]
 
-
 use actix_web::web::BytesMut;
-use actix_web::{get, middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer,Responder};
+use actix_web::{
+    get, middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder,
+};
 
 use actix::prelude::*;
 use actix::AsyncContext;
 use actix_web_actors::ws;
 
-
 use async_stream::stream;
-use tokio::io::AsyncReadExt;
 use mime_guess::from_path;
-use tokio::io::AsyncWriteExt;
-use tokio::sync::Mutex;
 use pty_process::{OwnedReadPty, OwnedWritePty, Pty};
 use std::collections::HashMap;
 use std::env;
+use std::io::Read;
+use tokio::io::AsyncWriteExt;
+use tokio::io::{stdout, AsyncReadExt};
+use tokio::sync::Mutex;
+use tokio_util::io::CopyToBytes;
 
 use std::sync::Arc;
 
@@ -54,10 +56,11 @@ impl Actor for MyWs {
         let filtered_env: HashMap<String, String> = env::vars()
             .filter(|&(ref k, _)| k == "TERM" || k == "TZ" || k == "LANG" || k == "PATH")
             .collect();
-        let pty= pty_process::Pty::new().unwrap();
+        let pty = pty_process::Pty::new().unwrap();
         pty.resize(pty_process::Size::new(50, 130)).unwrap();
         let mut cmd = pty_process::Command::new("sh");
         cmd.envs(filtered_env);
+
         cmd.env("key", "xterm-256color");
         let child = cmd.spawn(&pty.pts().unwrap()).unwrap();
         // run(&mut child, &mut pty).await.expect("error run");
@@ -199,21 +202,21 @@ async fn ws_handler(req: HttpRequest, stream: web::Payload) -> Result<HttpRespon
 struct Asset;
 fn handle_embedded_file(path: &str) -> HttpResponse {
     match Asset::get(path) {
-      Some(content) => HttpResponse::Ok()
-        .content_type(from_path(path).first_or_octet_stream().as_ref())
-        .body(content.data.into_owned()),
-      None => HttpResponse::NotFound().body("404 Not Found"),
+        Some(content) => HttpResponse::Ok()
+            .content_type(from_path(path).first_or_octet_stream().as_ref())
+            .body(content.data.into_owned()),
+        None => HttpResponse::NotFound().body("404 Not Found"),
     }
-  }
+}
 
 #[get("/")]
 async fn index() -> impl Responder {
     handle_embedded_file("index.html")
 }
-  
+
 #[actix_web::get("/{_:.*}")]
 async fn staticfs(path: web::Path<String>) -> impl Responder {
-  handle_embedded_file(path.as_str())
+    handle_embedded_file(path.as_str())
 }
 
 #[actix_web::main]
@@ -224,7 +227,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(|| {
         App::new()
             .wrap(middleware::Logger::default())
-            .route("/ws/", web::get().to(ws_handler))
+            .route("/ws", web::get().to(ws_handler))
             .service(index)
             .service(staticfs)
     })
@@ -298,8 +301,27 @@ pub async fn run(
     Ok(())
 }
 
-#[test]
-fn testList() {
-    let list: [u32; 3] = [1, 23, 4];
-    let t = list[0];
+#[tokio::test]
+async fn test_list() {
+    let mut p = pty::PsuedoTerminal::allocate();
+    let mut command = tokio::process::Command::new("bash");
+    command.env("TERM", "xterm-256color");
+    let (mut tty, child) = p.unwrap().spawn(command).await.expect("fail to spawn");
+    let mut buffer = vec![0u8; 256];
+    let pid: u32 = child.id().unwrap_or(0);
+    let _ = tty.write(b"htop\n").await;
+    let _ = tty.flush().await;
+    loop {
+        tokio::select! {
+            read = tty.read(&mut buffer[..]) => {
+                let read = read.map_err(|e| log::error!("Failed to read from child {pid} PTY: {e}")).unwrap();
+                // let mut message = std::mem::replace(&mut buffer, vec![0u8; 256]);
+                // message[0] = b'd';
+                // message.truncate(read );
+                let mut stdout=stdout();
+                stdout.write_all(&buffer[..read]).await.unwrap();
+
+            },
+        }
+    }
 }

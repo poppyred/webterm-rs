@@ -7,17 +7,27 @@
     <script src="node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
     <script src="node_modules/xterm-addon-web-links/lib/xterm-addon-web-links.js"></script>
     <script src="node_modules/xterm-addon-attach/lib/xterm-addon-attach.js"></script>
+    <style type="text/css">
+        body {
+            margin: 0;
+        }
+
+        html,
+        body,
+        #terminal {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
 </head>
 
 <body>
-    <h1>learning</h1>
     <div id="terminal"></div>
     <script type="module">
         const term = new Terminal({
-            cols: 130,
-            rows: 60,
+            fontFamily: "Menlo, Monaco, 'Courier New', monospace,'NotoSansMono Nerd Font'",
         });
-        const socket = new WebSocket('ws://localhost:8080/ws/');
+        const socket = new WebSocket(`ws://${window.location.host}/ws`);
         const attachAddon = new AttachAddon.AttachAddon(socket);
         const fitAddon = new FitAddon.FitAddon();
 
@@ -25,6 +35,7 @@
         // Attach the socket to term
         term.loadAddon(attachAddon);
         term.loadAddon(fitAddon);
+        fitAddon.fit();
         term.open(document.getElementById('terminal'));
 
         socket.onopen = function () {
