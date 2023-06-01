@@ -1,6 +1,6 @@
 [package]
 name = "webterm-rs"
-version = "0.1.4"
+version = "0.1.5"
 authors = ["gaoyan <373251686@qq.com>"]
 edition = "2021"
 repository = "https://github.com/poppyred/webterm-rs.git"
@@ -14,8 +14,8 @@ include = ["src/**/*","pty-process","web" ,"LICENSE", "README.md", "CHANGELOG.md
 
 [dependencies]
 nix="0.26.2"
-pty-process ={path="./pty-process",version="0.3.0",features=["async"]}
-pty ={path="./pty",version="0.1.0"}
+pty-process ={path="pty-process",version="0.3.0",features=["async"]}
+pty ={path="pty",version="0.1.0"}
 actix-web={version="4.3.1"}
 actix-test={version="0.1.1"}
 actix={version="0.13.0"}
