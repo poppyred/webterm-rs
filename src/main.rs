@@ -164,7 +164,7 @@ impl Handler<CommandResize> for MyWs {
             let resize = resize.get("resize").expect("get resize error");
             let cols = resize.get("cols").expect("get cols fail").as_u64().expect("cols type err");
             let rows = resize.get("rows").expect("get rows fail ").as_u64().expect("rows type err");
-            lock.resize(Size::new_u64(rows, cols)).unwrap();
+            lock.resize(Size::new(rows.try_into().unwrap(), cols.try_into().unwrap())).unwrap();
         }
         .into_actor(self)
         .spawn(ctx);
