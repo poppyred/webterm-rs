@@ -1,30 +1,38 @@
-#![feature(mutex_unlock)]
-
-use actix_web::web::BytesMut;
 use actix_web::{
-    get, middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder,
+    get, middleware, web, web::BytesMut, App, Error, HttpRequest, HttpResponse, HttpServer,
+    Responder,
 };
+mod raw_guard;
 
-use actix::prelude::*;
-use actix::AsyncContext;
+use actix::{
+    fut::{future::Map, wrap_stream},
+    prelude::*,
+    AsyncContext,
+};
 use actix_web_actors::ws;
 
 use async_stream::stream;
+use futures_util::stream::poll_fn;
+use log::{error, info, warn};
 use mime_guess::from_path;
-use pty_process::{OwnedReadPty, OwnedWritePty, Pty};
-use std::collections::HashMap;
-use std::env;
-use std::io::Read;
-use tokio::io::AsyncWriteExt;
-use tokio::io::{stdout, AsyncReadExt};
-use tokio::sync::Mutex;
-use tokio_util::io::CopyToBytes;
+use pty_process::{OwnedReadPty, OwnedWritePty, Pty, Size};
+use serde_json::Value;
+use tokio_stream::{wrappers::LinesStream, StreamExt};
+use tokio_util::io::ReaderStream;
 
-use std::sync::Arc;
+use std::{collections::HashMap, env, ops::DerefMut, sync::Arc, task::Poll};
+
+use tokio::{
+    io::{stdout, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader},
+    sync::Mutex,
+};
 
 #[derive(Message)]
 #[rtype(result = "Result<(), ()>")]
 struct CommandRunner(String);
+#[derive(Message)]
+#[rtype(result = "Result<(), ()>")]
+struct CommandResize(String);
 
 #[derive(Debug, Message)]
 #[rtype(result = "Result<(), ()>")]
@@ -57,32 +65,32 @@ impl Actor for MyWs {
             .filter(|&(ref k, _)| k == "TERM" || k == "TZ" || k == "LANG" || k == "PATH")
             .collect();
         let pty = pty_process::Pty::new().unwrap();
-        pty.resize(pty_process::Size::new(50, 130)).unwrap();
-        let mut cmd = pty_process::Command::new("sh");
+        pty.resize(pty_process::Size::new(100, 200)).unwrap();
+        let mut cmd = pty_process::Command::new("zsh");
         cmd.envs(filtered_env);
 
         cmd.env("key", "xterm-256color");
         let child = cmd.spawn(&pty.pts().unwrap()).unwrap();
+
         // run(&mut child, &mut pty).await.expect("error run");
         let (r, w) = pty.into_split();
         self.r = Some(Arc::new(Mutex::new(r)));
         self.w = Some(Arc::new(Mutex::new(w)));
+        let _raw = raw_guard::RawGuard::new();
+
         // self.pty = Some(Arc::new(Mutex::new(pty)));
-        // let r = self.r.clone().unwrap();
-        // let lines = tokio::io::BufReader::new( {
-        //    r
-        // }).lines();
-        // ctx.add_stream(LinesStream::new(lines).map(|l|{
-        //     Ok(Line(String::from(l.unwrap())))
-        // }));
         let output = self.r.clone();
+
         ctx.add_stream(stream! {
             let mut out_buf = [0_u8; 40960];
             loop{
                 let mutex = output.clone().expect("clone error");
                 {
                     match mutex.try_lock_owned(){
+
                         Ok(mut lock)=>{
+                            info!("read lock");
+
 
                         let len =( lock).read(&mut out_buf).await.expect("read error");
                         let s = String::from_utf8(out_buf[..len].to_vec()).expect("cov str error");
@@ -92,7 +100,7 @@ impl Actor for MyWs {
                     };
                 }
                 // let _ = tokio::time::sleep(Duration::from_millis(1000)).await;
-                println!("sleep");
+                info!("read unlock");
 
             }
         });
@@ -108,33 +116,13 @@ impl StreamHandler<Result<Line, ws::ProtocolError>> for MyWs {
     }
 }
 
-impl StreamHandler<Result<BytesMut, std::io::Error>> for MyWs {
-    fn handle(&mut self, msg: Result<BytesMut, std::io::Error>, ctx: &mut Self::Context) {
-        match msg {
-            Ok(line) => {
-                println!("{line:?}");
-                ctx.binary(line)
-            }
-            Err(err) => (), //Handle errors
-        }
-    }
-}
-
-impl StreamHandler<Line> for MyWs {
-    fn handle(&mut self, msg: Line, ctx: &mut Self::Context) {
-        println!("{}", msg.0);
-        ctx.text(msg.0);
-    }
-}
-
 impl StreamHandler<Ping> for MyWs {
     fn handle(&mut self, item: Ping, ctx: &mut Self::Context) {
-        println!("PING");
+        info!("PING");
         // System::current().stop()
     }
-
     fn finished(&mut self, ctx: &mut Self::Context) {
-        println!("finished");
+        info!("finished");
     }
 }
 /// Handler for ws::Message message
@@ -147,15 +135,40 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWs {
             Ok(ws::Message::Nop) => {}
             Ok(ws::Message::Ping(msg)) => ctx.pong(&msg),
             Ok(ws::Message::Text(text)) => {
-                println!("recevie from ws text: {text}");
+                info!("recevie from ws text: {text}");
+
+                if text.len() > 3 {
+                    ctx.notify(CommandResize(text.to_string()));
+                    return;
+                }
                 ctx.notify(CommandRunner(text.to_string()));
             }
             Ok(ws::Message::Binary(bin)) => {
-                println!("recevie from ws bin: {bin:?}");
+                info!("recevie from ws bin: {bin:?}");
                 ctx.binary(bin)
             }
             _ => (),
         }
+    }
+}
+
+impl Handler<CommandResize> for MyWs {
+    type Result = Result<(), ()>;
+
+    fn handle(&mut self, msg: CommandResize, ctx: &mut Self::Context) -> Self::Result {
+        let pty = self.w.clone();
+        async move {
+            let binding = pty.clone().unwrap();
+            let lock = binding.lock().await;
+            let resize: Value = serde_json::from_str(&msg.0.to_string()).unwrap();
+            let resize = resize.get("resize").expect("get resize error");
+            let cols = resize.get("cols").expect("get cols fail").as_u64().expect("cols type err");
+            let rows = resize.get("rows").expect("get rows fail ").as_u64().expect("rows type err");
+            lock.resize(Size::new_u64(rows, cols)).unwrap();
+        }
+        .into_actor(self)
+        .spawn(ctx);
+        Ok(())
     }
 }
 
@@ -169,18 +182,20 @@ impl Handler<CommandRunner> for MyWs {
             let binding = pty.expect("err pty");
             let mut lock = binding.lock().await;
             //  if let Ok(ref mut mutex) = lock {
-
+            info!("write lock");
             let _ = lock
                 .write_all(msg.0.to_owned().as_bytes())
                 .await
                 .expect("write error");
-            let _ = lock.flush().await.expect("flush error");
-            println!("w flush");
+            // let _ = lock.flush().await.expect("flush error");
+            // info!("w flush");
+            info!("write unlock");
 
             ();
         };
-        let lang_server_fut = actix::fut::wrap_future(fut);
-        ctx.spawn(lang_server_fut);
+        fut.into_actor(self).spawn(ctx);
+        // let lang_server_fut = actix::fut::wrap_future(fut.into_actor(self).spawn(ctx));
+        // ctx.spawn(lang_server_fut);
 
         Ok(())
     }
@@ -194,7 +209,7 @@ impl Drop for MyWs {
 
 async fn ws_handler(req: HttpRequest, stream: web::Payload) -> Result<HttpResponse, Error> {
     let resp = ws::start(MyWs::new(), &req, stream);
-    println!("{:?}", resp);
+    info!("{:?}", resp);
     resp
 }
 #[derive(rust_embed::RustEmbed)]
@@ -221,9 +236,10 @@ async fn staticfs(path: web::Path<String>) -> impl Responder {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    std::env::set_var("RUST_LOG", "error");
     env_logger::init();
-    std::env::set_var("RUST_LOG", "actix_server=info,actix_web=info");
-
+    // std::env::set_var("RUST_LOG", "actix_server=info,actix_web=info");
+    info!("server start at: http://0.0.0.0:8080");
     HttpServer::new(|| {
         App::new()
             .wrap(middleware::Logger::default())
@@ -274,7 +290,7 @@ pub async fn run(
                     }
                 }
                 Err(e) => {
-                    eprintln!("stdin read failed: {:?}", e);
+                    error!("stdin read failed: {:?}", e);
                     break;
                 }
             },
@@ -290,7 +306,7 @@ pub async fn run(
                     stdout.flush().await.unwrap();
                 }
                 Err(e) => {
-                    eprintln!("pty read failed: {:?}", e);
+                    error!("pty read failed: {:?}", e);
                     break;
                 }
             },
@@ -324,4 +340,29 @@ async fn test_list() {
             },
         }
     }
+}
+
+struct T(String);
+impl AsyncRead for T {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let b = buf.initialize_unfilled();
+        return std::task::Poll::Ready(Ok(()));
+    }
+}
+
+#[tokio::test]
+async fn test_mutex() {
+    let t = T("a".to_string());
+    ReaderStream::new(t);
+
+    let t1 = T("a".to_string());
+    let at: Arc<Mutex<T>> = Arc::new(Mutex::new(t1));
+    let at = at.clone();
+    let mut l: tokio::sync::MutexGuard<T> = at.lock().await;
+    let dl = l.deref_mut();
+    ReaderStream::new(dl);
 }

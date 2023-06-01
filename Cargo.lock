@@ -1177,10 +1177,12 @@ name = "pty-process"
 version = "0.3.0"
 dependencies = [
  "futures 0.3.28",
+ "futures-util",
  "libc",
  "nix",
  "regex",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -1692,11 +1694,14 @@ dependencies = [
  "futures-util",
  "log",
  "mime_guess",
+ "nix",
  "pretty_env_logger",
  "pty",
  "pty-process",
  "regex",
  "rust-embed",
+ "serde",
+ "serde_json",
  "tokio",
  "tokio-codec",
  "tokio-stream",

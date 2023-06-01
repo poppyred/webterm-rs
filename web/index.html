@@ -43,11 +43,11 @@
 
         }
 
-        // term.onResize((size) => {
-        //     socket.emit('resize', size)
-        // })
+        term.onResize((size) => {
+            console.log({ "resize": size })
+            socket.send(JSON.stringify({ "resize": size }))
+        })
 
-        fitAddon.fit()
         // socket.emit('resize', { cols: term.cols, rows: term.rows })
 
         window.addEventListener('resize', (data) => {
